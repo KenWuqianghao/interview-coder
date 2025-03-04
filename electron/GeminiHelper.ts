@@ -89,12 +89,37 @@ export class GeminiHelper {
 
       // Extract and parse the JSON response
       const textResponse = response.data.candidates[0].content.parts[0].text;
+      console.log("Raw Gemini response:", textResponse);
+      
       const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
       
       if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+        try {
+          return JSON.parse(jsonMatch[0]);
+        } catch (parseError) {
+          console.error("JSON parse error:", parseError);
+          
+          // Try to clean the JSON string by removing trailing commas
+          const cleanedJson = jsonMatch[0].replace(/,(\s*[\]}])/g, '$1');
+          console.log("Cleaned JSON:", cleanedJson);
+          
+          try {
+            return JSON.parse(cleanedJson);
+          } catch (secondError) {
+            console.error("Second JSON parse error:", secondError);
+            
+            // If all else fails, create a basic response
+            return {
+              title: "Parsing Error",
+              description: "Failed to parse the problem description. Please try again.",
+              constraints: [],
+              examples: [],
+              language: language
+            };
+          }
+        }
       } else {
-        throw new Error("Failed to parse JSON response from Gemini API");
+        throw new Error("Failed to extract JSON from Gemini API response");
       }
     } catch (error: any) {
       console.error("Error in extractProblemInfo:", error.message);
@@ -184,12 +209,37 @@ export class GeminiHelper {
 
       // Extract and parse the JSON response
       const textResponse = response.data.candidates[0].content.parts[0].text;
+      console.log("Raw Gemini solution response:", textResponse);
+      
       const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
       
       if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+        try {
+          return JSON.parse(jsonMatch[0]);
+        } catch (parseError) {
+          console.error("JSON parse error in solution:", parseError);
+          
+          // Try to clean the JSON string by removing trailing commas
+          const cleanedJson = jsonMatch[0].replace(/,(\s*[\]}])/g, '$1');
+          console.log("Cleaned JSON solution:", cleanedJson);
+          
+          try {
+            return JSON.parse(cleanedJson);
+          } catch (secondError) {
+            console.error("Second JSON parse error in solution:", secondError);
+            
+            // If all else fails, create a basic response
+            return {
+              approach: "Parsing Error",
+              timeComplexity: "Unknown",
+              spaceComplexity: "Unknown",
+              code: "// Failed to parse the solution. Please try again.",
+              explanation: "There was an error parsing the solution from the API."
+            };
+          }
+        }
       } else {
-        throw new Error("Failed to parse JSON response from Gemini API");
+        throw new Error("Failed to extract JSON from Gemini API response");
       }
     } catch (error: any) {
       console.error("Error in generateSolution:", error.message);
