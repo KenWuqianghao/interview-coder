@@ -5,6 +5,7 @@ import { IProcessingHelperDeps } from "./main"
 import axios from "axios"
 import { app } from "electron"
 import { BrowserWindow } from "electron"
+import { GeminiHelper } from "./GeminiHelper"
 
 const isDev = !app.isPackaged
 const API_BASE_URL = isDev
@@ -14,6 +15,7 @@ const API_BASE_URL = isDev
 export class ProcessingHelper {
   private deps: IProcessingHelperDeps
   private screenshotHelper: ScreenshotHelper
+  private geminiHelper: GeminiHelper
 
   // AbortControllers for API requests
   private currentProcessingAbortController: AbortController | null = null
@@ -22,6 +24,7 @@ export class ProcessingHelper {
   constructor(deps: IProcessingHelperDeps) {
     this.deps = deps
     this.screenshotHelper = deps.getScreenshotHelper()
+    this.geminiHelper = new GeminiHelper()
   }
 
   private async waitForInitialization(
@@ -238,25 +241,10 @@ export class ProcessingHelper {
         const language = await this.getLanguage()
         let problemInfo
 
-        // First API call - extract problem info
+        // First API call - extract problem info using Gemini
         try {
-          const extractResponse = await axios.post(
-            `${API_BASE_URL}/api/extract`,
-            { imageDataList, language },
-            {
-              signal,
-              timeout: 300000,
-              validateStatus: function (status) {
-                return status < 500
-              },
-              maxRedirects: 5,
-              headers: {
-                "Content-Type": "application/json"
-              }
-            }
-          )
-
-          problemInfo = extractResponse.data
+          // Use GeminiHelper to extract problem info
+          problemInfo = await this.geminiHelper.extractProblemInfo(imageDataList, language)
 
           // Store problem info in AppState
           this.deps.setProblemInfo(problemInfo)
@@ -279,69 +267,71 @@ export class ProcessingHelper {
               )
               return { success: true, data: solutionsResult.data }
             } else {
-              throw new Error(
-                solutionsResult.error || "Failed to generate solutions"
-              )
+              throw new Error(solutionsResult.error)
             }
           }
         } catch (error: any) {
-          // If the request was cancelled, don't retry
-          if (axios.isCancel(error)) {
-            return {
-              success: false,
-              error: "Processing was canceled by the user."
-            }
-          }
-
-          console.error("API Error Details:", {
-            status: error.response?.status,
-            data: error.response?.data,
-            message: error.message,
-            code: error.code
-          })
-
-          // Handle API-specific errors
-          if (
-            error.response?.data?.error &&
-            typeof error.response.data.error === "string"
-          ) {
-            if (error.response.data.error.includes("Operation timed out")) {
-              throw new Error(
-                "Operation timed out after 1 minute. Please try again."
+          console.error("Error extracting problem info:", error)
+          
+          if (error.message?.includes("GEMINI_API_KEY not found")) {
+            if (mainWindow) {
+              mainWindow.webContents.send(
+                this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+                "Gemini API key not found in environment variables. Please set the GEMINI_API_KEY environment variable."
               )
             }
-            if (error.response.data.error.includes("API Key out of credits")) {
-              throw new Error(error.response.data.error)
+            return {
+              success: false,
+              error: "Gemini API key not found in environment variables"
             }
-            throw new Error(error.response.data.error)
           }
-
-          // If we get here, it's an unknown error
-          throw new Error(error.message || "Server error. Please try again.")
+          
+          throw error
         }
       } catch (error: any) {
-        // Log the full error for debugging
-        console.error("Processing error details:", {
-          message: error.message,
-          code: error.code,
-          response: error.response?.data,
-          retryCount
-        })
-
-        // If it's a cancellation or we've exhausted retries, return the error
-        if (axios.isCancel(error) || retryCount >= MAX_RETRIES) {
-          return { success: false, error: error.message }
+        console.error("Processing error:", error)
+        
+        // Handle API errors
+        if (error.response?.status === 401 || error.response?.status === 403) {
+          const mainWindow = this.deps.getMainWindow()
+          if (mainWindow) {
+            mainWindow.webContents.send(
+              this.deps.PROCESSING_EVENTS.API_KEY_INVALID,
+              "Invalid Gemini API key. Please check your API key and try again."
+            )
+          }
+          return {
+            success: false,
+            error: "Invalid Gemini API key"
+          }
         }
-
-        // Increment retry count and continue
+        
+        // Handle other errors
+        const errorMessage = error.message || "Unknown error occurred"
+        const mainWindow = this.deps.getMainWindow()
+        if (mainWindow) {
+          mainWindow.webContents.send(
+            this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+            `Error processing screenshots: ${errorMessage}`
+          )
+        }
+        
         retryCount++
+        if (retryCount <= MAX_RETRIES) {
+          console.log(`Retrying (${retryCount}/${MAX_RETRIES})...`)
+          continue
+        }
+        
+        return {
+          success: false,
+          error: errorMessage
+        }
       }
     }
-
-    // If we get here, all retries failed
+    
     return {
       success: false,
-      error: "Failed to process after multiple attempts. Please try again."
+      error: "Maximum retries exceeded"
     }
   }
 
@@ -354,27 +344,27 @@ export class ProcessingHelper {
         throw new Error("No problem info available")
       }
 
-      const response = await axios.post(
-        `${API_BASE_URL}/api/generate`,
-        { ...problemInfo, language },
-        {
-          signal,
-          timeout: 300000,
-          validateStatus: function (status) {
-            return status < 500
-          },
-          maxRedirects: 5,
-          headers: {
-            "Content-Type": "application/json"
-          }
-        }
-      )
-
-      return { success: true, data: response.data }
+      // Use GeminiHelper to generate solution
+      const solution = await this.geminiHelper.generateSolution(problemInfo, language)
+      
+      return { success: true, data: solution }
     } catch (error: any) {
       const mainWindow = this.deps.getMainWindow()
+      
+      if (error.message?.includes("GEMINI_API_KEY not found")) {
+        if (mainWindow) {
+          mainWindow.webContents.send(
+            this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+            "Gemini API key not found in environment variables. Please set the GEMINI_API_KEY environment variable."
+          )
+        }
+        return {
+          success: false,
+          error: "Gemini API key not found in environment variables"
+        }
+      }
 
-      // Handle timeout errors (both 504 and axios timeout)
+      // Handle timeout errors
       if (error.code === "ECONNABORTED" || error.response?.status === 504) {
         // Cancel ongoing API requests
         this.cancelOngoingRequests()
@@ -396,29 +386,19 @@ export class ProcessingHelper {
         }
       }
 
-      if (error.response?.data?.error?.includes("API Key out of credits")) {
-        if (mainWindow) {
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.OUT_OF_CREDITS
-          )
-        }
-        return { success: false, error: error.response.data.error }
-      }
-
-      if (
-        error.response?.data?.error?.includes(
-          "Please close this window and re-enter a valid Open AI API key."
+      // Handle other errors
+      const errorMessage = error.message || "Unknown error occurred"
+      if (mainWindow) {
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+          `Error generating solution: ${errorMessage}`
         )
-      ) {
-        if (mainWindow) {
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.API_KEY_INVALID
-          )
-        }
-        return { success: false, error: error.response.data.error }
       }
-
-      return { success: false, error: error.message }
+      
+      return {
+        success: false,
+        error: errorMessage
+      }
     }
   }
 

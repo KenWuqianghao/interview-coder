@@ -399,8 +399,7 @@ function loadEnvVariables() {
     dotenv.config()
     console.log("Environment variables loaded:", {
       NODE_ENV: process.env.NODE_ENV,
-      // Remove Supabase references
-      OPEN_AI_API_KEY: process.env.OPEN_AI_API_KEY ? "exists" : "missing"
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY ? 'set' : 'missing'
     })
   } catch (error) {
     console.error("Error loading environment variables:", error)

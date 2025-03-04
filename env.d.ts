@@ -3,6 +3,8 @@
 interface ImportMetaEnv {
   // Remove Supabase environment variables
   readonly VITE_OPEN_AI_API_KEY: string
+  // API Keys
+  readonly VITE_GEMINI_API_KEY: string
 }
 
 interface ImportMeta {

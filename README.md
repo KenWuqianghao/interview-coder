@@ -29,6 +29,7 @@ This is a modified version of the Interview Coder application with the authentic
 
 - Node.js (v16 or higher)
 - npm or yarn
+- Google Gemini API key
 
 ### Installation
 
@@ -45,14 +46,19 @@ This is a modified version of the Interview Coder application with the authentic
    yarn
    ```
 
-3. Run the application in development mode:
+3. Set up your Gemini API key:
+   - Create a `.env` file in the root directory
+   - Add your Gemini API key: `GEMINI_API_KEY=your_api_key_here`
+   - You can get a Gemini API key from [Google AI Studio](https://aistudio.google.com/)
+
+4. Run the application in development mode:
    ```
    npm run dev
    # or
    yarn dev
    ```
 
-4. Build the application for production:
+5. Build the application for production:
    ```
    npm run build
    # or
@@ -61,7 +67,7 @@ This is a modified version of the Interview Coder application with the authentic
 
 ## API Integration
 
-This version of the application still requires an API connection to process screenshots and generate solutions. You'll need to set up your own API service or modify the code to use a different solution generation method.
+This version of the application uses Google's Gemini API (gemini-2.0-flash model) to process screenshots and generate solutions. You must provide your own Gemini API key in the `.env` file for the application to work properly.
 
 ## Disclaimer
 
